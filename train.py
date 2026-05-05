@@ -74,28 +74,14 @@ class Workspace:
         
         # Setup device
         device_str = cfg.get('device', 'gpu')
-        try:
-            if device_str.lower() == 'cpu':
-                # Force CPU
-                jax.config.update('jax_platform_name', 'cpu')
-                print(f'Using device: CPU')
-            else:
-                # Use GPU (default)
-                devices = jax.devices(device_str.split(':')[0])
-                if len(devices) > 0:
-                    if ':' in device_str:
-                        device_id = int(device_str.split(':')[1])
-                        if device_id < len(devices):
-                            print(f'Using device: {devices[device_id]}')
-                        else:
-                            print(f'Warning: GPU {device_id} not found, using {devices[0]}')
-                    else:
-                        print(f'Using device: {devices[0]}')
-                else:
-                    print('Warning: No GPU found, falling back to CPU')
-                    jax.config.update('jax_platform_name', 'cpu')
-        except Exception as e:
-            print(f'Warning: Device setup failed ({e}), using default device')
+        if device_str.lower() == 'cpu':
+            # Force CPU
+            jax.config.update('jax_platform_name', 'cpu')
+            print(f'Using device: CPU')
+        else:
+            # Use GPU
+            devices = jax.devices('gpu')
+            print(f'Using device: {devices[0]}')
         
         # Set seeds
         set_seed_everywhere(cfg['seed'])
@@ -106,8 +92,13 @@ class Workspace:
             api_key=cfg.get('comet_api_key', os.environ.get('COMET_API_KEY')),
             project_name=cfg.get('comet_project', 'drq-jax'),
             workspace=cfg.get('comet_workspace', None),
-            experiment_name=cfg.get('comet_experiment_name', None),
         )
+        
+        # Set experiment name if provided
+        experiment_name = cfg.get('comet_experiment_name', None)
+        if experiment_name is not None:
+            self.experiment.set_name(experiment_name)
+        
         self.experiment.log_parameters(cfg)
         
         # Create environment

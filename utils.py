@@ -145,7 +145,7 @@ def make_env(domain_name: str, task_name: str, seed: int,
 
 def soft_update(params: Dict, target_params: Dict, tau: float) -> Dict:
     """Soft update of target network parameters."""
-    return jax.tree.map(
+    return jax.tree_util.tree_map(
         lambda p, tp: tau * p + (1 - tau) * tp,
         params, target_params
     )

@@ -4,7 +4,15 @@ A JAX reimplementation of **DrQ (Data-regularized Q-learning)** with Comet ML lo
 
 ## Requirements
 
-**Python Version: 3.10**
+- **Python**: 3.10 (required)
+- **CUDA**: 12.x (for GPU support)
+
+**Tested Configuration:**
+- JAX 0.4.23 + jaxlib 0.4.23+cuda12.cudnn89
+- Flax 0.6.11
+- Optax 0.1.7
+- NumPy 1.26.4
+- SciPy 1.11.4
 
 ## Overview
 
@@ -18,14 +26,29 @@ Original paper: [Image Augmentation Is All You Need: Regularizing Deep Reinforce
 
 ## Installation
 
-1. Install dependencies:
+### CPU-Only 
+
 ```bash
 pip install -r requirements.txt
 ```
 
-2. For GPU support (recommended), install JAX with CUDA:
+### GPU Support (CUDA 12.x)
+
+**Important:** Install packages in specific order to avoid dependency conflicts:
+
 ```bash
-pip install --upgrade "jax[cuda12_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+pip install numpy==1.26.4
+pip install scipy==1.11.4
+pip install jaxlib==0.4.23+cuda12.cudnn89 -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+pip install jax==0.4.23
+pip install --no-deps flax==0.6.11
+pip install --no-deps optax==0.1.7
+
+# 3. Install remaining dependencies
+pip install gymnasium dm_control shimmy[dm-control] comet-ml pyyaml imageio imageio-ffmpeg
+
+# 4. Verify GPU detection
+python -c "import jax; print('Devices:', jax.devices())"
 ```
 
 ## Usage

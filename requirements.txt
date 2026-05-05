@@ -1,11 +1,12 @@
 # JAX DrQ Requirements
-# Python 3.9, 3.10, or 3.11 required
+# Python 3.10 required (tested with 3.10)
 
-# Core dependencies
-jax>=0.4.20
-jaxlib>=0.4.20
-flax>=0.7.5
-optax>=0.1.7
+# Core dependencies - EXACT versions for CUDA 12 compatibility
+numpy==1.26.4
+scipy==1.11.4
+jax==0.4.23
+flax==0.6.11
+optax==0.1.7
 
 # Environment
 gymnasium>=0.29.0
@@ -17,9 +18,8 @@ comet-ml>=3.35.0
 pyyaml>=6.0
 
 # Utilities
-numpy>=1.24.0
 imageio>=2.31.0
 imageio-ffmpeg>=0.4.9
 
-# Optional: For GPU support, install jaxlib with CUDA
-# pip install --upgrade "jax[cuda12_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+# GPU support: Install jaxlib with CUDA 12 separately
+# pip install jaxlib==0.4.23+cuda12.cudnn89 -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
