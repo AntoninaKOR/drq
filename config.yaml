@@ -1,1 +1,50 @@
-config_k2m2.yaml
+# JAX DrQ Configuration
+
+# Environment
+env: cartpole_swingup
+action_repeat: 4
+image_size: 84
+image_pad: 4
+frame_stack: 3
+max_steps: 1000  # Maximum episode steps (default for dm_control tasks)
+
+# Training
+num_train_steps: 1000000
+num_train_iters: 1
+num_seed_steps: 1000
+batch_size: 128
+replay_buffer_capacity: 100000
+seed: 1
+device: gpu  # Device to use: 'cpu', 'gpu', or 'gpu:0', 'gpu:1', etc.
+
+# Evaluation
+eval_frequency: 5000
+num_eval_episodes: 10
+
+# Agent hyperparameters
+lr: 0.001
+discount: 0.99
+init_temperature: 0.1
+actor_update_freq: 2
+critic_tau: 0.01
+critic_target_update_freq: 2
+use_augmentation: true  # Set to false for SAC, true for DrQ
+drq_k: 2  # K: Number of augmentations for Q-target averaging (1 or 2)
+drq_m: 2  # M: Number of augmentations for Q-function averaging (1 or 2)
+
+# Network architecture
+hidden_dim: 1024
+hidden_depth: 2
+feature_dim: 50
+
+# Logging
+log_frequency: 1000
+save_video: true
+work_dir: ./runs
+checkpoint_frequency: 10000  
+
+# Comet ML
+comet_api_key: null  # Set via COMET_API_KEY environment variable
+comet_project: drq-jax
+comet_workspace: null
+comet_experiment_name: null  
