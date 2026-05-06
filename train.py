@@ -10,7 +10,7 @@ import jax
 import jax.numpy as jnp
 from jax import random as jrandom
 import yaml
-from comet_ml import Experiment
+from comet_ml import Experiment, ExistingExperiment
 from flax import serialization
 
 from drq import DRQAgent
@@ -95,16 +95,25 @@ class Workspace:
         self.rng = jrandom.PRNGKey(cfg['seed'])
         
         # Initialize Comet ML
-        self.experiment = Experiment(
-            api_key=cfg.get('comet_api_key', os.environ.get('COMET_API_KEY')),
-            project_name=cfg.get('comet_project', 'drq-jax'),
-            workspace=cfg.get('comet_workspace', None),
-        )
-        
-        # Set experiment name if provided
-        experiment_name = cfg.get('comet_experiment_name', None)
-        if experiment_name is not None:
-            self.experiment.set_name(experiment_name)
+        # Check if resuming an existing experiment
+        experiment_key = os.environ.get('COMET_EXPERIMENT_KEY')
+        if experiment_key:
+            print(f'Resuming existing Comet ML experiment: {experiment_key}')
+            self.experiment = ExistingExperiment(
+                api_key=cfg.get('comet_api_key', os.environ.get('COMET_API_KEY')),
+                experiment_key=experiment_key,
+            )
+        else:
+            self.experiment = Experiment(
+                api_key=cfg.get('comet_api_key', os.environ.get('COMET_API_KEY')),
+                project_name=cfg.get('comet_project', 'drq-jax'),
+                workspace=cfg.get('comet_workspace', None),
+            )
+            
+            # Set experiment name if provided (only for new experiments)
+            experiment_name = cfg.get('comet_experiment_name', None)
+            if experiment_name is not None:
+                self.experiment.set_name(experiment_name)
         
         self.experiment.log_parameters(cfg)
         
