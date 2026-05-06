@@ -65,11 +65,9 @@ class ReplayBuffer:
         
         # Apply augmentation (random crop) if enabled (DrQ), otherwise use original images (SAC)
         if self.use_augmentation:
-            keys = jrandom.split(rng_key, 4)
-            obses = self._augment(obses, keys[0])
-            next_obses = self._augment(next_obses, keys[1])
-            obses_aug = self._augment(obses, keys[2])
-            next_obses_aug = self._augment(next_obses, keys[3])
+            keys = jrandom.split(rng_key, 2)
+            obses_aug = self._augment(obses, keys[0])
+            next_obses_aug = self._augment(next_obses, keys[1])
         else:
             # No augmentation - use same observations for both (SAC mode)
             obses_aug = obses
