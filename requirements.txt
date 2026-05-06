@@ -1,7 +1,4 @@
 # JAX DrQ Requirements
-# Python 3.10 required (tested with 3.10)
-
-# Core dependencies - EXACT versions for CUDA 12 compatibility
 numpy==1.26.4
 scipy==1.11.4
 jax==0.4.23

@@ -123,11 +123,13 @@ class DRQAgent:
         critic_state: TrainState,
         actor_params: flax.core.FrozenDict,
         obs: jnp.ndarray,
-        obs_aug: jnp.ndarray,
+        obs_aug1: jnp.ndarray,
+        obs_aug2: jnp.ndarray,
         action: jnp.ndarray,
         reward: jnp.ndarray,
         next_obs: jnp.ndarray,
-        next_obs_aug: jnp.ndarray,
+        next_obs_aug1: jnp.ndarray,
+        next_obs_aug2: jnp.ndarray,
         not_done: jnp.ndarray,
         log_alpha: jnp.ndarray,
         rng_key: jax.random.PRNGKey,
@@ -137,54 +139,57 @@ class DRQAgent:
         alpha = jnp.exp(log_alpha)
         
         def critic_loss_fn(params):
-            # Compute target Q-values
+            # Compute target Q-values using K augmented next states
             key1, key2 = jrandom.split(rng_key)
             
-            # Target for original next observation
-            next_mu, next_log_std = self.actor_state.apply_fn(actor_params, next_obs)
-            next_action, next_log_prob = sample_squashed_normal(key1, next_mu, next_log_std)
-            target_q1, target_q2 = self.critic.apply(
-                critic_state.target_params, next_obs, next_action
+            # Target for first augmented next observation
+            next_mu1, next_log_std1 = self.actor_state.apply_fn(actor_params, next_obs_aug1)
+            next_action1, next_log_prob1 = sample_squashed_normal(key1, next_mu1, next_log_std1)
+            target_q1_1, target_q2_1 = self.critic.apply(
+                critic_state.target_params, next_obs_aug1, next_action1
             )
-            target_v = jnp.minimum(target_q1, target_q2) - alpha * next_log_prob
-            target_q = reward + not_done * self.discount * target_v
+            target_v1 = jnp.minimum(target_q1_1, target_q2_1) - alpha * next_log_prob1
+            target_q = reward + not_done * self.discount * target_v1
             
-            # K=2: Target for augmented next observation (averaged with original)
-            # K=1: Skip augmented target (use only original)
+            # K=2: Average with second augmented next observation
+            # K=1: Use only first augmentation
             if self.drq_k == 2:
-                next_mu_aug, next_log_std_aug = self.actor_state.apply_fn(
-                    actor_params, next_obs_aug
+                next_mu2, next_log_std2 = self.actor_state.apply_fn(
+                    actor_params, next_obs_aug2
                 )
-                next_action_aug, next_log_prob_aug = sample_squashed_normal(
-                    key2, next_mu_aug, next_log_std_aug
+                next_action2, next_log_prob2 = sample_squashed_normal(
+                    key2, next_mu2, next_log_std2
                 )
-                target_q1_aug, target_q2_aug = self.critic.apply(
-                    critic_state.target_params, next_obs_aug, next_action_aug
+                target_q1_2, target_q2_2 = self.critic.apply(
+                    critic_state.target_params, next_obs_aug2, next_action2
                 )
-                target_v_aug = jnp.minimum(target_q1_aug, target_q2_aug) - alpha * next_log_prob_aug
-                target_q_aug = reward + not_done * self.discount * target_v_aug
-                # Average both targets
-                target_q = (target_q + target_q_aug) / 2.0
+                target_v2 = jnp.minimum(target_q1_2, target_q2_2) - alpha * next_log_prob2
+                target_q2 = reward + not_done * self.discount * target_v2
+                # Average over K=2 augmentations
+                target_q = (target_q + target_q2) / 2.0
             
-            # Current Q-values
-            q1, q2 = self.critic.apply(params, obs, action)
-            q1_loss = jnp.mean((q1 - target_q) ** 2)
-            q2_loss = jnp.mean((q2 - target_q) ** 2)
+            # Current Q-values using M augmented observations
+            # First augmentation
+            q1_1, q2_1 = self.critic.apply(params, obs_aug1, action)
+            q1_loss = jnp.mean((q1_1 - target_q) ** 2)
+            q2_loss = jnp.mean((q2_1 - target_q) ** 2)
+            
+            # M=2: Average loss over two augmented observations
+            # M=1: Use only first augmentation
+            if self.drq_m == 2:
+                q1_2, q2_2 = self.critic.apply(params, obs_aug2, action)
+                q1_loss_2 = jnp.mean((q1_2 - target_q) ** 2)
+                q2_loss_2 = jnp.mean((q2_2 - target_q) ** 2)
+                # Average over M=2 augmentations (as per DrQ algorithm)
+                q1_loss = (q1_loss + q1_loss_2) / 2.0
+                q2_loss = (q2_loss + q2_loss_2) / 2.0
             
             total_loss = q1_loss + q2_loss
             
-            # M=2: Add augmented Q-values loss (DrQ regularization)
-            # M=1: Skip augmented loss
-            if self.drq_m == 2:
-                q1_aug, q2_aug = self.critic.apply(params, obs_aug, action)
-                q1_aug_loss = jnp.mean((q1_aug - target_q) ** 2)
-                q2_aug_loss = jnp.mean((q2_aug - target_q) ** 2)
-                total_loss = total_loss + q1_aug_loss + q2_aug_loss
-            
             return total_loss, {
                 'critic_loss': total_loss,
-                'q1': jnp.mean(q1),
-                'q2': jnp.mean(q2),
+                'q1': jnp.mean(q1_1),
+                'q2': jnp.mean(q2_1),
             }
         
         (loss, info), grads = jax.value_and_grad(
@@ -269,8 +274,10 @@ class DRQAgent:
         reward: jnp.ndarray,
         next_obs: jnp.ndarray,
         not_done: jnp.ndarray,
-        obs_aug: jnp.ndarray,
-        next_obs_aug: jnp.ndarray,
+        obs_aug1: jnp.ndarray,
+        obs_aug2: jnp.ndarray,
+        next_obs_aug1: jnp.ndarray,
+        next_obs_aug2: jnp.ndarray,
         rng_key: jax.random.PRNGKey,
     ) -> Dict:
         """Update agent."""
@@ -281,7 +288,7 @@ class DRQAgent:
         self.critic_state, critic_info = self._update_critic(
             self.critic_state,
             self.actor_state.params,
-            obs, obs_aug, action, reward, next_obs, next_obs_aug, not_done,
+            obs, obs_aug1, obs_aug2, action, reward, next_obs, next_obs_aug1, next_obs_aug2, not_done,
             self.log_alpha,
             key1
         )
@@ -290,10 +297,12 @@ class DRQAgent:
         
         # Update actor and alpha
         if self.step % self.actor_update_freq == 0:
+            # Use augmented observations for actor (as per DrQ paper)
+            # Use first augmentation for actor update
             self.actor_state, actor_info = self._update_actor(
                 self.actor_state,
                 self.critic_state.params,
-                obs,
+                obs_aug1,
                 self.log_alpha,
                 key2
             )
@@ -303,7 +312,7 @@ class DRQAgent:
                 self.log_alpha,
                 self.alpha_opt_state,
                 self.actor_state.params,
-                obs,
+                obs_aug1,
                 key3
             )
             info.update(alpha_info)

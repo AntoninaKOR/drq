@@ -16,6 +16,7 @@ batch_size: 128
 replay_buffer_capacity: 100000
 seed: 1
 device: gpu  # Device to use: 'cpu', 'gpu', or 'gpu:0', 'gpu:1', etc.
+gpu_memory_fraction: 0.8  
 
 # Evaluation
 eval_frequency: 5000

@@ -65,15 +65,19 @@ class ReplayBuffer:
         
         # Apply augmentation (random crop) if enabled (DrQ), otherwise use original images (SAC)
         if self.use_augmentation:
-            keys = jrandom.split(rng_key, 2)
-            obses_aug = self._augment(obses, keys[0])
-            next_obses_aug = self._augment(next_obses, keys[1])
+            keys = jrandom.split(rng_key, 4)
+            obses_aug1 = self._augment(obses, keys[0])
+            obses_aug2 = self._augment(obses, keys[1])
+            next_obses_aug1 = self._augment(next_obses, keys[2])
+            next_obses_aug2 = self._augment(next_obses, keys[3])
         else:
-            # No augmentation - use same observations for both (SAC mode)
-            obses_aug = obses
-            next_obses_aug = next_obses
+            # No augmentation - use same observations for all (SAC mode)
+            obses_aug1 = obses
+            obses_aug2 = obses
+            next_obses_aug1 = next_obses
+            next_obses_aug2 = next_obses
         
-        return obses, actions, rewards, next_obses, not_dones_no_max, obses_aug, next_obses_aug
+        return obses, actions, rewards, next_obses, not_dones_no_max, obses_aug1, obses_aug2, next_obses_aug1, next_obses_aug2
     
     def _augment(self, imgs, key):
         """Apply random crop augmentation to images."""

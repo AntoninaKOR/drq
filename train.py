@@ -81,7 +81,14 @@ class Workspace:
         else:
             # Use GPU
             devices = jax.devices('gpu')
-            print(f'Using device: {devices[0]}')
+            if len(devices) == 0:
+                raise RuntimeError('No GPU devices found. Set CUDA_VISIBLE_DEVICES or use --device cpu')
+            print(f'Using device: {devices[0]} (total GPU devices: {len(devices)})')
+            
+            mem_fraction = cfg.get('gpu_memory_fraction', 0.8)
+            if mem_fraction is not None:
+                os.environ.setdefault('XLA_PYTHON_CLIENT_MEM_FRACTION', str(mem_fraction))
+                print(f'GPU memory fraction: {mem_fraction}')
         
         # Set seeds
         set_seed_everywhere(cfg['seed'])
@@ -337,12 +344,12 @@ class Workspace:
                     
                     # Sample batch
                     batch = self.replay_buffer.sample(self.cfg['batch_size'], sample_key)
-                    obs_b, action_b, reward_b, next_obs_b, not_done_b, obs_aug_b, next_obs_aug_b = batch
+                    obs_b, action_b, reward_b, next_obs_b, not_done_b, obs_aug1_b, obs_aug2_b, next_obs_aug1_b, next_obs_aug2_b = batch
                     
                     # Update agent
                     info = self.agent.update(
                         obs_b, action_b, reward_b, next_obs_b, not_done_b,
-                        obs_aug_b, next_obs_aug_b, update_key
+                        obs_aug1_b, obs_aug2_b, next_obs_aug1_b, next_obs_aug2_b, update_key
                     )
                     
                     # Log training metrics
@@ -376,7 +383,14 @@ def main():
     parser.add_argument('--experiment_name', type=str, default=None, help='Comet ML experiment name')
     parser.add_argument('--checkpoint', type=str, default=None, help='Path to checkpoint file to resume training')
     parser.add_argument('--device', type=str, default=None, help='Device to use: cpu, gpu, gpu:0, gpu:1, etc.')
+    parser.add_argument('--gpu_id', type=int, default=None, help='GPU ID to use (sets CUDA_VISIBLE_DEVICES)')
+    parser.add_argument('--gpu_memory_fraction', type=float, default=None, help='GPU memory fraction (0.0-1.0)')
     args = parser.parse_args()
+    
+    # Set CUDA_VISIBLE_DEVICES before importing JAX/creating config
+    if args.gpu_id is not None:
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu_id)
+        print(f'Set CUDA_VISIBLE_DEVICES={args.gpu_id}')
     
     # Load config
     with open(args.config, 'r') as f:
@@ -393,6 +407,8 @@ def main():
         cfg['comet_experiment_name'] = args.experiment_name
     if args.device is not None:
         cfg['device'] = args.device
+    if args.gpu_memory_fraction is not None:
+        cfg['gpu_memory_fraction'] = args.gpu_memory_fraction
     
     # Create workspace and run
     workspace = Workspace(cfg)
