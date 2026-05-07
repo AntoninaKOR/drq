@@ -12,7 +12,7 @@ max_steps: 1000  # Maximum episode steps (default for dm_control tasks)
 num_train_steps: 1000000
 num_train_iters: 1
 num_seed_steps: 1000
-batch_size: 128
+batch_size: 512
 replay_buffer_capacity: 100000
 seed: 1
 device: gpu  # Device to use: 'cpu', 'gpu', or 'gpu:0', 'gpu:1', etc.
@@ -46,6 +46,6 @@ checkpoint_frequency: 10000
 
 # Comet ML
 comet_api_key: null  # Set via COMET_API_KEY environment variable
-comet_project: drq-jax
+comet_project: drq
 comet_workspace: null
 comet_experiment_name: null  

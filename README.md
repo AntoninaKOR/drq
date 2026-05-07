@@ -37,12 +37,9 @@ pip install -r requirements.txt
 **Important:** Install packages in specific order to avoid dependency conflicts:
 
 ```bash
-pip install numpy==1.26.4
-pip install scipy==1.11.4
-pip install jaxlib==0.4.23+cuda12.cudnn89 -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-pip install jax==0.4.23
-pip install --no-deps flax==0.6.11
-pip install --no-deps optax==0.1.7
+pip install -r requirements.txt
+pip install -U "jax[cuda12_pip]==0.4.23" flax==0.6.11 optax==0.1.7 -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+conda install -c conda-forge cudnn=8.9
 
 # 3. Install remaining dependencies
 pip install gymnasium dm_control shimmy[dm-control] comet-ml pyyaml imageio imageio-ffmpeg
