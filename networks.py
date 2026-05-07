@@ -122,8 +122,8 @@ class Critic(nn.Module):
         return q1, q2
 
 
-class ActorCriticEncoder(nn.Module):
-    """Combined network with shared encoder for actor-critic."""
+class ActorCritic(nn.Module):
+    """Combined ActorCritic with shared encoder (like original PyTorch DrQ)."""
     
     action_dim: int
     hidden_dim: int = 1024
@@ -132,65 +132,85 @@ class ActorCriticEncoder(nn.Module):
     log_std_min: float = -10.0
     log_std_max: float = 2.0
     
-    def setup(self):
-        self.encoder = Encoder(feature_dim=self.feature_dim)
-        
     @nn.compact
-    def __call__(self, obs, action=None, mode='actor'):
-        if mode == 'encoder':
-            return self.encoder(obs)
-        elif mode == 'actor':
-            return self.forward_actor(obs)
-        elif mode == 'critic':
-            return self.forward_critic(obs, action)
-        else:
-            raise ValueError(f"Unknown mode: {mode}")
+    def __call__(self, obs, action):
+        """Initialize all parameters by calling both actor and critic."""
+        # Call both to initialize all parameters
+        mu, log_std = self.actor(obs, detach_encoder=False)
+        q1, q2 = self.critic(obs, action, detach_encoder=False)
+        return mu, log_std, q1, q2
     
-    def forward_actor(self, obs):
-        x = self.encoder(obs)
+    @nn.compact
+    def actor(self, obs, detach_encoder=False):
+        """Forward pass through actor (returns mu, log_std)."""
+        # Use shared encoder with fixed name
+        encoder = Encoder(feature_dim=self.feature_dim, name='shared_encoder')
+        features = encoder(obs)
         
-        # MLP trunk
-        for _ in range(self.hidden_depth):
+        # Detach encoder gradients for actor update 
+        if detach_encoder:
+            features = jax.lax.stop_gradient(features)
+        
+        # Actor MLP trunk
+        x = features
+        for i in range(self.hidden_depth):
             x = nn.Dense(features=self.hidden_dim,
                         kernel_init=orthogonal(jnp.sqrt(2.0)),
-                        bias_init=constant(0.0))(x)
+                        bias_init=constant(0.0),
+                        name=f'actor_dense_{i}')(x)
             x = nn.relu(x)
         
-        # Output layer
+        # Output layer for mean and log_std
         x = nn.Dense(features=2 * self.action_dim,
                     kernel_init=orthogonal(0.01),
-                    bias_init=constant(0.0))(x)
+                    bias_init=constant(0.0),
+                    name='actor_output')(x)
         
+        # Split into mu and log_std
         mu, log_std = jnp.split(x, 2, axis=-1)
         log_std = jnp.tanh(log_std)
         log_std = self.log_std_min + 0.5 * (self.log_std_max - self.log_std_min) * (log_std + 1)
         
         return mu, log_std
     
-    def forward_critic(self, obs, action):
-        obs_features = self.encoder(obs)
-        x = jnp.concatenate([obs_features, action], axis=-1)
+    @nn.compact
+    def critic(self, obs, action, detach_encoder=False):
+        """Forward pass through critic (returns q1, q2)."""
+        # Use shared encoder with fixed name (same as actor)
+        encoder = Encoder(feature_dim=self.feature_dim, name='shared_encoder')
+        features = encoder(obs)
         
-        # Q1
+        # Detach encoder gradients for actor update 
+        if detach_encoder:
+            features = jax.lax.stop_gradient(features)
+        
+        # Concatenate features and action
+        x = jnp.concatenate([features, action], axis=-1)
+        
+        # Q1 network
         q1 = x
-        for _ in range(self.hidden_depth):
+        for i in range(self.hidden_depth):
             q1 = nn.Dense(features=self.hidden_dim,
                          kernel_init=orthogonal(jnp.sqrt(2.0)),
-                         bias_init=constant(0.0))(q1)
+                         bias_init=constant(0.0),
+                         name=f'critic_q1_dense_{i}')(q1)
             q1 = nn.relu(q1)
         q1 = nn.Dense(features=1,
                      kernel_init=orthogonal(1.0),
-                     bias_init=constant(0.0))(q1)
+                     bias_init=constant(0.0),
+                     name='critic_q1_output')(q1)
         
-        # Q2
+        # Q2 network
         q2 = x
-        for _ in range(self.hidden_depth):
+        for i in range(self.hidden_depth):
             q2 = nn.Dense(features=self.hidden_dim,
                          kernel_init=orthogonal(jnp.sqrt(2.0)),
-                         bias_init=constant(0.0))(q2)
+                         bias_init=constant(0.0),
+                         name=f'critic_q2_dense_{i}')(q2)
             q2 = nn.relu(q2)
         q2 = nn.Dense(features=1,
                      kernel_init=orthogonal(1.0),
-                     bias_init=constant(0.0))(q2)
+                     bias_init=constant(0.0),
+                     name='critic_q2_output')(q2)
         
         return q1, q2

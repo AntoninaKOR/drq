@@ -9,7 +9,7 @@ import flax
 from flax.training import train_state
 from functools import partial
 
-from networks import Actor, Critic
+from networks import ActorCritic
 from utils import soft_update, sample_squashed_normal
 
 
@@ -50,16 +50,11 @@ class DRQAgent:
         self.drq_m = drq_m  # Q-function averaging: 1 or 2
         
         # Split RNG keys
-        key1, key2, key3 = jrandom.split(rng_key, 3)
+        key1, key2 = jrandom.split(rng_key, 2)
         
-        # Initialize networks
-        self.actor = Actor(
+        # Initialize ActorCritic with shared encoder
+        self.actor_critic = ActorCritic(
             action_dim=action_dim,
-            hidden_dim=hidden_dim,
-            hidden_depth=hidden_depth,
-            feature_dim=feature_dim
-        )
-        self.critic = Critic(
             hidden_dim=hidden_dim,
             hidden_depth=hidden_depth,
             feature_dim=feature_dim
@@ -69,26 +64,30 @@ class DRQAgent:
         dummy_obs = jnp.zeros((1, *obs_shape))
         dummy_action = jnp.zeros((1, action_dim))
         
-        actor_params = self.actor.init(key1, dummy_obs)
-        critic_params = self.critic.init(key2, dummy_obs, dummy_action)
+        params = self.actor_critic.init(key1, dummy_obs, dummy_action)
         
         # Initialize optimizers
+        # Actor optimizer only updates actor head (encoder not updated via actor loss)
         self.actor_optimizer = optax.adam(learning_rate=lr)
+        # Critic optimizer updates both critic head AND shared encoder
         self.critic_optimizer = optax.adam(learning_rate=lr)
         self.alpha_optimizer = optax.adam(learning_rate=lr)
         
         # Create train states
+        # Note: We use single params dict but separate optimizers
+        # Actor optimizer will only update actor params (with detached encoder)
+        # Critic optimizer updates both critic params and encoder
         self.actor_state = TrainState.create(
-            apply_fn=self.actor.apply,
-            params=actor_params,
+            apply_fn=lambda p, o: self.actor_critic.apply(p, o, method=self.actor_critic.actor),
+            params=params,
             tx=self.actor_optimizer
         )
         
         self.critic_state = TrainState.create(
-            apply_fn=self.critic.apply,
-            params=critic_params,
+            apply_fn=lambda p, o, a: self.actor_critic.apply(p, o, a, method=self.actor_critic.critic),
+            params=params,
             tx=self.critic_optimizer,
-            target_params=critic_params
+            target_params=params
         )
         
         # Temperature parameter
@@ -107,7 +106,10 @@ class DRQAgent:
             deterministic: bool = False) -> jnp.ndarray:
         """Select action given observation."""
         obs = jnp.expand_dims(obs, axis=0)
-        mu, log_std = self.actor_state.apply_fn(self.actor_state.params, obs)
+        mu, log_std = self.actor_critic.apply(
+            self.actor_state.params, obs, 
+            method=self.actor_critic.actor
+        )
         
         if deterministic:
             action = jnp.tanh(mu)
@@ -143,10 +145,13 @@ class DRQAgent:
             key1, key2 = jrandom.split(rng_key)
             
             # Target for first augmented next observation
-            next_mu1, next_log_std1 = self.actor_state.apply_fn(actor_params, next_obs_aug1)
+            next_mu1, next_log_std1 = self.actor_critic.apply(
+                actor_params, next_obs_aug1, method=self.actor_critic.actor
+            )
             next_action1, next_log_prob1 = sample_squashed_normal(key1, next_mu1, next_log_std1)
-            target_q1_1, target_q2_1 = self.critic.apply(
-                critic_state.target_params, next_obs_aug1, next_action1
+            target_q1_1, target_q2_1 = self.actor_critic.apply(
+                critic_state.target_params, next_obs_aug1, next_action1,
+                method=self.actor_critic.critic
             )
             target_v1 = jnp.minimum(target_q1_1, target_q2_1) - alpha * next_log_prob1
             target_q = reward + not_done * self.discount * target_v1
@@ -154,14 +159,15 @@ class DRQAgent:
             # K=2: Average with second augmented next observation
             # K=1: Use only first augmentation
             if self.drq_k == 2:
-                next_mu2, next_log_std2 = self.actor_state.apply_fn(
-                    actor_params, next_obs_aug2
+                next_mu2, next_log_std2 = self.actor_critic.apply(
+                    actor_params, next_obs_aug2, method=self.actor_critic.actor
                 )
                 next_action2, next_log_prob2 = sample_squashed_normal(
                     key2, next_mu2, next_log_std2
                 )
-                target_q1_2, target_q2_2 = self.critic.apply(
-                    critic_state.target_params, next_obs_aug2, next_action2
+                target_q1_2, target_q2_2 = self.actor_critic.apply(
+                    critic_state.target_params, next_obs_aug2, next_action2,
+                    method=self.actor_critic.critic
                 )
                 target_v2 = jnp.minimum(target_q1_2, target_q2_2) - alpha * next_log_prob2
                 target_q2 = reward + not_done * self.discount * target_v2
@@ -170,19 +176,23 @@ class DRQAgent:
             
             # Current Q-values using M augmented observations
             # First augmentation
-            q1_1, q2_1 = self.critic.apply(params, obs_aug1, action)
+            q1_1, q2_1 = self.actor_critic.apply(
+                params, obs_aug1, action, method=self.actor_critic.critic
+            )
             q1_loss = jnp.mean((q1_1 - target_q) ** 2)
             q2_loss = jnp.mean((q2_1 - target_q) ** 2)
             
-            # M=2: Average loss over two augmented observations
+            # M=2: Add loss from second augmentation
             # M=1: Use only first augmentation
             if self.drq_m == 2:
-                q1_2, q2_2 = self.critic.apply(params, obs_aug2, action)
+                q1_2, q2_2 = self.actor_critic.apply(
+                    params, obs_aug2, action, method=self.actor_critic.critic
+                )
                 q1_loss_2 = jnp.mean((q1_2 - target_q) ** 2)
                 q2_loss_2 = jnp.mean((q2_2 - target_q) ** 2)
-                # Average over M=2 augmentations (as per DrQ algorithm)
-                q1_loss = (q1_loss + q1_loss_2) / 2.0
-                q2_loss = (q2_loss + q2_loss_2) / 2.0
+                # Sum over M=2 augmentations (as per DrQ original implementation)
+                q1_loss = q1_loss + q1_loss_2
+                q2_loss = q2_loss + q2_loss_2
             
             total_loss = q1_loss + q2_loss
             
@@ -214,10 +224,18 @@ class DRQAgent:
         alpha = jnp.exp(log_alpha)
         
         def actor_loss_fn(params):
-            mu, log_std = self.actor.apply(params, obs)
+            # Forward through actor with detached encoder 
+            mu, log_std = self.actor_critic.apply(
+                params, obs, 
+                method=lambda module, o: module.actor(o, detach_encoder=True)
+            )
             action, log_prob = sample_squashed_normal(rng_key, mu, log_std)
             
-            q1, q2 = self.critic.apply(critic_params, obs, action)
+            # Forward through critic with detached encoder 
+            q1, q2 = self.actor_critic.apply(
+                critic_params, obs, action,
+                method=lambda module, o, a: module.critic(o, a, detach_encoder=True)
+            )
             q = jnp.minimum(q1, q2)
             
             actor_loss = jnp.mean(alpha * log_prob - q)
@@ -248,7 +266,9 @@ class DRQAgent:
         
         def alpha_loss_fn(log_alpha):
             alpha = jnp.exp(log_alpha)
-            mu, log_std = self.actor.apply(actor_params, obs)
+            mu, log_std = self.actor_critic.apply(
+                actor_params, obs, method=self.actor_critic.actor
+            )
             _, log_prob = sample_squashed_normal(rng_key, mu, log_std)
             
             alpha_loss = jnp.mean(alpha * (-log_prob - self.target_entropy))
@@ -284,14 +304,17 @@ class DRQAgent:
         
         key1, key2, key3 = jrandom.split(rng_key, 3)
         
-        # Update critic
+        # Update critic (updates both critic head and shared encoder)
         self.critic_state, critic_info = self._update_critic(
             self.critic_state,
-            self.actor_state.params,
+            self.actor_state.params,  # Same params (shared)
             obs, obs_aug1, obs_aug2, action, reward, next_obs, next_obs_aug1, next_obs_aug2, not_done,
             self.log_alpha,
             key1
         )
+        
+        # Sync actor params with updated critic params (shared encoder updated)
+        self.actor_state = self.actor_state.replace(params=self.critic_state.params)
         
         info = critic_info
         
@@ -299,14 +322,18 @@ class DRQAgent:
         if self.step % self.actor_update_freq == 0:
             # Use augmented observations for actor (as per DrQ paper)
             # Use first augmentation for actor update
+            # Note: encoder is detached inside actor_loss_fn
             self.actor_state, actor_info = self._update_actor(
                 self.actor_state,
-                self.critic_state.params,
+                self.critic_state.params,  # Same params (shared)
                 obs_aug1,
                 self.log_alpha,
                 key2
             )
             info.update(actor_info)
+            
+            # Sync critic params with updated actor params (only actor head updated)
+            self.critic_state = self.critic_state.replace(params=self.actor_state.params)
             
             self.log_alpha, self.alpha_opt_state, alpha_info = self._update_alpha(
                 self.log_alpha,
