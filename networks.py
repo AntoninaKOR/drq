@@ -132,39 +132,65 @@ class ActorCritic(nn.Module):
     log_std_min: float = -10.0
     log_std_max: float = 2.0
     
-    @nn.compact
+    def setup(self):
+        """Setup shared encoder and separate actor/critic heads."""
+        # Shared encoder (updated only via critic loss)
+        self.encoder = Encoder(feature_dim=self.feature_dim)
+        
+        # Actor MLP layers
+        self.actor_layers = [
+            nn.Dense(features=self.hidden_dim,
+                    kernel_init=orthogonal(jnp.sqrt(2.0)),
+                    bias_init=constant(0.0))
+            for _ in range(self.hidden_depth)
+        ]
+        self.actor_out = nn.Dense(features=2 * self.action_dim,
+                                  kernel_init=orthogonal(0.01),
+                                  bias_init=constant(0.0))
+        
+        # Critic Q1 MLP layers
+        self.q1_layers = [
+            nn.Dense(features=self.hidden_dim,
+                    kernel_init=orthogonal(jnp.sqrt(2.0)),
+                    bias_init=constant(0.0))
+            for _ in range(self.hidden_depth)
+        ]
+        self.q1_out = nn.Dense(features=1,
+                              kernel_init=orthogonal(1.0),
+                              bias_init=constant(0.0))
+        
+        # Critic Q2 MLP layers
+        self.q2_layers = [
+            nn.Dense(features=self.hidden_dim,
+                    kernel_init=orthogonal(jnp.sqrt(2.0)),
+                    bias_init=constant(0.0))
+            for _ in range(self.hidden_depth)
+        ]
+        self.q2_out = nn.Dense(features=1,
+                              kernel_init=orthogonal(1.0),
+                              bias_init=constant(0.0))
+    
     def __call__(self, obs, action):
-        """Initialize all parameters by calling both actor and critic."""
-        # Call both to initialize all parameters
+        """Forward through both actor and critic."""
         mu, log_std = self.actor(obs, detach_encoder=False)
         q1, q2 = self.critic(obs, action, detach_encoder=False)
         return mu, log_std, q1, q2
     
-    @nn.compact
     def actor(self, obs, detach_encoder=False):
         """Forward pass through actor (returns mu, log_std)."""
-        # Use shared encoder with fixed name
-        encoder = Encoder(feature_dim=self.feature_dim, name='shared_encoder')
-        features = encoder(obs)
+        # Encode observations with shared encoder
+        features = self.encoder(obs)
         
-        # Detach encoder gradients for actor update 
+        # Detach encoder gradients for actor update (like PyTorch version)
         if detach_encoder:
             features = jax.lax.stop_gradient(features)
         
-        # Actor MLP trunk
+        # Actor MLP
         x = features
-        for i in range(self.hidden_depth):
-            x = nn.Dense(features=self.hidden_dim,
-                        kernel_init=orthogonal(jnp.sqrt(2.0)),
-                        bias_init=constant(0.0),
-                        name=f'actor_dense_{i}')(x)
+        for layer in self.actor_layers:
+            x = layer(x)
             x = nn.relu(x)
-        
-        # Output layer for mean and log_std
-        x = nn.Dense(features=2 * self.action_dim,
-                    kernel_init=orthogonal(0.01),
-                    bias_init=constant(0.0),
-                    name='actor_output')(x)
+        x = self.actor_out(x)
         
         # Split into mu and log_std
         mu, log_std = jnp.split(x, 2, axis=-1)
@@ -173,14 +199,12 @@ class ActorCritic(nn.Module):
         
         return mu, log_std
     
-    @nn.compact
     def critic(self, obs, action, detach_encoder=False):
         """Forward pass through critic (returns q1, q2)."""
-        # Use shared encoder with fixed name (same as actor)
-        encoder = Encoder(feature_dim=self.feature_dim, name='shared_encoder')
-        features = encoder(obs)
+        # Encode observations with shared encoder
+        features = self.encoder(obs)
         
-        # Detach encoder gradients for actor update 
+        # Detach encoder gradients for actor update (like PyTorch version)
         if detach_encoder:
             features = jax.lax.stop_gradient(features)
         
@@ -189,28 +213,16 @@ class ActorCritic(nn.Module):
         
         # Q1 network
         q1 = x
-        for i in range(self.hidden_depth):
-            q1 = nn.Dense(features=self.hidden_dim,
-                         kernel_init=orthogonal(jnp.sqrt(2.0)),
-                         bias_init=constant(0.0),
-                         name=f'critic_q1_dense_{i}')(q1)
+        for layer in self.q1_layers:
+            q1 = layer(q1)
             q1 = nn.relu(q1)
-        q1 = nn.Dense(features=1,
-                     kernel_init=orthogonal(1.0),
-                     bias_init=constant(0.0),
-                     name='critic_q1_output')(q1)
+        q1 = self.q1_out(q1)
         
         # Q2 network
         q2 = x
-        for i in range(self.hidden_depth):
-            q2 = nn.Dense(features=self.hidden_dim,
-                         kernel_init=orthogonal(jnp.sqrt(2.0)),
-                         bias_init=constant(0.0),
-                         name=f'critic_q2_dense_{i}')(q2)
+        for layer in self.q2_layers:
+            q2 = layer(q2)
             q2 = nn.relu(q2)
-        q2 = nn.Dense(features=1,
-                     kernel_init=orthogonal(1.0),
-                     bias_init=constant(0.0),
-                     name='critic_q2_output')(q2)
+        q2 = self.q2_out(q2)
         
         return q1, q2
