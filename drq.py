@@ -348,8 +348,8 @@ class DRQAgent:
         if self.step % self.critic_target_update_freq == 0:
             self.critic_state = self.critic_state.replace(
                 target_params=soft_update(
-                    self.critic_state.params,
-                    self.critic_state.target_params,
+                    self.critic_state.params,           # new params
+                    self.critic_state.target_params,    # old target params
                     self.tau
                 )
             )
