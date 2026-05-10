@@ -131,6 +131,18 @@ The combination of K and M determines regularization strength:
 - **K=1, M=1** (Simplified): Minimal regularization, faster training
 - **K=1, M=2**: Heavier Q regularization without target averaging
 
+### Important Implementation Detail: K vs M Behavior
+
+**This implementation follows the original DrQ PyTorch code, not the paper's mathematical formulation.**
+
+**Key difference:**
+- **Parameter K (Q-target)**: Targets are **averaged** → `target = (target1 + target2) / 2`
+- **Parameter M (Q-loss)**: Losses are **summed** → `loss = loss1 + loss2` (no division by M)
+
+**Paper equation (Eq. 3):** `L = (1/NM) Σ (Q - target)²` — divides by both N and M
+
+**Actual implementation:** `L = (1/N) Σ [loss1 + loss2 + ...]` — only divides by batch size N
+
 
 ## Project Structure
 
