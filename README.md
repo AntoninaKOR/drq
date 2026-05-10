@@ -41,10 +41,6 @@ pip install -r requirements.txt
 pip install -U "jax[cuda12_pip]==0.4.23" flax==0.6.11 optax==0.1.7 -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 conda install -c conda-forge cudnn=8.9
 
-# 3. Install remaining dependencies
-pip install gymnasium dm_control shimmy[dm-control] comet-ml pyyaml imageio imageio-ffmpeg
-
-# 4. Verify GPU detection
 python -c "import jax; print('Devices:', jax.devices())"
 ```
 
@@ -91,7 +87,16 @@ This implementation supports both algorithms with configurable regularization st
 This significantly reduces overfitting and improves sample efficiency on pixel-based tasks.
 
 ## Implementation Details
+In original code idia is (look at def update_critic)
+```
+target_Q = (target_Q + target_Q_aug) / 2
 
+current_Q1, current_Q2 = self.critic(obs, action)  # obs
+critic_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(current_Q2, target_Q)
+
+Q1_aug, Q2_aug = self.critic(obs_aug, action)  
+critic_loss += F.mse_loss(Q1_aug, target_Q) + F.mse_loss(Q2_aug, target_Q)
+```
 ### DrQ Regularization Mechanisms
 
 **1. Random Crop Augmentation:**
@@ -116,11 +121,11 @@ target_q = reward + discount * V(next_obs)
 
 **3. Q-Function Averaging (Parameter M):**
 ```python
-# M=2 (default): Train on both observations
-loss = (Q(obs, action) - target_q)² + (Q(obs_aug, action) - target_q)²
+# M=2: Train on augmented observations
+loss = (Q(obs_aug1, action) - target_q)² + (Q(obs_aug2, action) - target_q)²
 
-# M=1: Train on original only
-loss = (Q(obs, action) - target_q)²
+# M=1: Train on original observation only
+loss = (Q(obs_aug1, action) - target_q)²
 ```
 
 **Configurable Regularization Strength:**
@@ -133,15 +138,14 @@ The combination of K and M determines regularization strength:
 
 ### Important Implementation Detail: K vs M Behavior
 
-**This implementation follows the original DrQ PyTorch code, not the paper's mathematical formulation.**
-
 **Key difference:**
 - **Parameter K (Q-target)**: Targets are **averaged** → `target = (target1 + target2) / 2`
 - **Parameter M (Q-loss)**: Losses are **summed** → `loss = loss1 + loss2` (no division by M)
 
 **Paper equation (Eq. 3):** `L = (1/NM) Σ (Q - target)²` — divides by both N and M
+or`L = (1/N) Σ [loss1 + loss2 + ...]` where losses with Q(obs)
 
-**Actual implementation:** `L = (1/N) Σ [loss1 + loss2 + ...]` — only divides by batch size N
+**Actual implementation:** `L = (1/N) Σ [loss1 + loss2 + ...]` — only divides by batch size N where losses with Q(obs_aug)
 
 
 ## Project Structure
